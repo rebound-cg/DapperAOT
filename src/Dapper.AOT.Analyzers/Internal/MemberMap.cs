@@ -80,7 +80,22 @@ internal sealed class MemberMap
                     break;
             }
         }
-        Members = GetMembers(forParameters, ElementType, Constructor, FactoryMethod);
+
+        if (ElementType.TypeKind != TypeKind.Interface)
+            Members = GetMembers(forParameters, ElementType, Constructor, FactoryMethod);
+        else
+        {
+            // parse all interfaces to construct members
+            var members = ImmutableArray.CreateBuilder<ElementMember>();
+            foreach (var i in ElementType.AllInterfaces)
+            {
+                members.AddRange(GetMembers(forParameters, i, Constructor, FactoryMethod));
+            }
+            // add members from the interface itself
+            members.AddRange(GetMembers(forParameters, ElementType, Constructor, FactoryMethod));
+
+            Members = members.ToImmutable();
+        }
     }
 
     static bool IsDynamicParameters(ITypeSymbol? type)
