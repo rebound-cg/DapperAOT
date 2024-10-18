@@ -22,6 +22,8 @@ internal static class CommandUtils
     [MethodImpl(MethodImplOptions.NoInlining)]
     internal static void ThrowMultiple() => _ = System.Linq.Enumerable.Single("  ");
 
+    private static readonly DateTime m_unixEpoch = new(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
     [MethodImpl(AggressiveOptions)]
     internal static ReadOnlySpan<int> UnsafeReadOnlySpan(int[] value, int length)
     {
@@ -157,12 +159,12 @@ internal static class CommandUtils
             }
             else if (typeof(T) == typeof(DateTime))
             {
-                DateTime t = Convert.ToDateTime(value, CultureInfo.InvariantCulture);
+                DateTime t = (value is DateTime) ? (DateTime)value : DateTime.SpecifyKind(m_unixEpoch.AddSeconds(Convert.ToInt64(value, CultureInfo.InvariantCulture)), DateTimeKind.Unspecified);
                 return Unsafe.As<DateTime, T>(ref t);
             }
             else if (typeof(T) == typeof(DateTime?))
             {
-                DateTime? t = Convert.ToDateTime(value, CultureInfo.InvariantCulture);
+                DateTime? t = (value is null or DateTime) ? (DateTime?)value : DateTime.SpecifyKind(m_unixEpoch.AddSeconds(Convert.ToInt64(value, CultureInfo.InvariantCulture)), DateTimeKind.Unspecified);
                 return Unsafe.As<DateTime?, T>(ref t);
             }
             else if (typeof(T) == typeof(Guid) && (s = value as string) is not null)

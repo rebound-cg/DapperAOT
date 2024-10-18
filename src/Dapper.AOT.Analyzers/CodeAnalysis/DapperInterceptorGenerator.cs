@@ -1120,7 +1120,8 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
                     bool useSetValueWithDefaultSize = false;
                     if (dbType is not null)
                     {
-                        sb.Append("p.DbType = global::System.Data.DbType.").Append(dbType.GetValueOrDefault().ToString()).Append(";").NewLine();
+                        var overrideDbType = dbType == DbType.DateTime ? DbType.Int64 : dbType; // specific to Rebound Framework
+                        sb.Append("p.DbType = global::System.Data.DbType.").Append(overrideDbType.GetValueOrDefault().ToString()).Append(";").NewLine();
                         if (size is null)
                         {
                             switch (dbType.GetValueOrDefault())
@@ -1166,6 +1167,12 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
                             if (useSetValueWithDefaultSize)
                             {
                                 sb.Append("SetValueWithDefaultSize(p, ").Append(source).Append(".").Append(member.CodeName).Append(");").NewLine();
+                            }                            
+                            else if (dbType == DbType.DateTime) // check for DateTime (specific for Rebound Framework)
+                            {
+                                // TODO move ReboundCG.Tennis.DateTimeExtensions to ReboundCG.Core
+                                // use global::ReboundCG.Tennis.DateTimeExtensions.ToEpochTime method to convert DateTime to long
+                                sb.Append("p.Value = ").Append("AsValue(").Append("global::ReboundCG.Tennis.DateTimeExtensions.ToEpochTime(").Append(source).Append(".").Append(member.CodeName).Append("));").NewLine();
                             }
                             else
                             {
@@ -1208,7 +1215,16 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
                     {
                         case ParameterDirection.Input:
                         case ParameterDirection.InputOutput:
-                            sb.Append("AsValue(").Append(source).Append(".").Append(member.CodeName).Append(");").NewLine();
+                            if (member.GetDbType(out _) == DbType.DateTime)
+                            {
+                                // TODO move ReboundCG.Tennis.DateTimeExtensions to ReboundCG.Core
+                                // use global::ReboundCG.Tennis.DateTimeExtensions.ToEpochTime method to convert DateTime to long
+                                sb.Append("AsValue(").Append("global::ReboundCG.Tennis.DateTimeExtensions.ToEpochTime(").Append(source).Append(".").Append(member.CodeName).Append("));").NewLine();
+                            }
+                            else
+                            {
+                                sb.Append("AsValue(").Append(source).Append(".").Append(member.CodeName).Append(");").NewLine();
+                            }
                             break;
                         default:
                             sb.Append("global::System.DBNull.Value;").NewLine();
