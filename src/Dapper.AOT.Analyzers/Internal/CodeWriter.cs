@@ -334,6 +334,10 @@ internal sealed class CodeWriter
         {
             return Append("global::Dapper.RowFactory.Inbuilt.").Append(helper);
         }
+        else if (resultType?.TypeKind == TypeKind.Interface)
+        {
+            return Append("RowFactory").Append(readers.GetIndex(resultType!)).Append(".GetInstance(type)");
+        }
         else
         {
             return Append("RowFactory").Append(readers.GetIndex(resultType!)).Append(".Instance");

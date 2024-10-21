@@ -489,6 +489,7 @@ public sealed partial class DapperAnalyzer : DiagnosticAnalyzer
         var callLocation = op.GetMemberLocation();
         argExpression = null;
         sql = null;
+        resultType = null;
         bool? buffered = null;
 
         // check the args
@@ -564,6 +565,29 @@ public sealed partial class DapperAnalyzer : DiagnosticAnalyzer
                         }
                     }
                     break;
+                case "type":
+                    // Ensure the argument is an invocation operation
+                    if (arg.Value is IInvocationOperation invocation)
+                    {
+                        // Check if the method being invoked is a generic method
+                        if (invocation.TargetMethod.IsGenericMethod)
+                        {
+                            // Get the generic type arguments
+                            var typeArguments = invocation.TargetMethod.TypeArguments;
+                            if (typeArguments.Length == 1)
+                            {
+                                // use the generic type argument as the result type
+                                resultType = typeArguments[0];
+                                if (resultType is not null)
+                                {
+                                    flags |= OperationFlags.TypedResult;
+                                }
+
+                                break;
+                            }
+                        }
+                    }
+                    goto default;
                 default:
                     if (!flags.HasAny(OperationFlags.NotAotSupported | OperationFlags.DoNotGenerate))
                     {
@@ -596,7 +620,7 @@ public sealed partial class DapperAnalyzer : DiagnosticAnalyzer
         {
             flags |= buffered.GetValueOrDefault() ? OperationFlags.Buffered : OperationFlags.Unbuffered;
         }
-        resultType = op.GetResultType(flags);
+        resultType ??= op.GetResultType(flags);
         if (flags.HasAny(OperationFlags.Query) && IdentifyDbType(resultType, out _) is null)
         {
             flags |= OperationFlags.BindResultsByName;

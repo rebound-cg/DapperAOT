@@ -279,7 +279,7 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
         foreach (var grp in ctx.Nodes.OfType<SuccessSourceState>().Where(x => !x.Flags.HasAny(OperationFlags.DoNotGenerate)).GroupBy(x => x.Group(), CommonComparer.Instance))
         {
             // first, try to resolve the helper method that we're going to use for this
-            var (flags, method, parameterType, parameterMap, _, additionalCommandState) = grp.Key;
+            var (flags, method, parameterType, parameterMap, _, additionalCommandState, _) = grp.Key;
             const bool useUnsafe = false;
             int usageCount = 0;
 
@@ -736,6 +736,7 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
         if (map is null) return;
 
         var members = map.Members;
+        var useTypeAsConstructorParameter = type.TypeKind == TypeKind.Interface;
 
         if (members.IsDefaultOrEmpty && map.Constructor is null && map.FactoryMethod is null)
         {
@@ -751,7 +752,7 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
         var hasGetOnlyMembers = members.Any(member => member is { IsGettable: true, IsSettable: false, IsInitOnly: false });
         var useConstructorDeferred = map.Constructor is not null;
         var useFactoryMethodDeferred = map.FactoryMethod is not null;
-        
+
         // Implementation detail: 
         // constructor takes advantage over factory method.
         var useDeferredConstruction = useConstructorDeferred || useFactoryMethodDeferred || hasInitOnlyMembers || hasGetOnlyMembers || hasRequiredMembers;
@@ -765,10 +766,23 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
 
         void WriteRowFactoryHeader()
         {
-            sb.Append("private sealed class RowFactory").Append(index).Append(" : global::Dapper.RowFactory").Append("<").Append(type).Append(">")
-            .Indent().NewLine()
-            .Append("internal static readonly RowFactory").Append(index).Append(" Instance = new();").NewLine()
-            .Append("private RowFactory").Append(index).Append("() {}").NewLine();
+            if (!useTypeAsConstructorParameter)
+            {
+                sb.Append("private sealed class RowFactory").Append(index).Append(" : global::Dapper.RowFactory").Append("<").Append(type).Append(">")
+                .Indent().NewLine()
+                .Append("internal static readonly RowFactory").Append(index).Append(" Instance = new();").NewLine()
+                .Append("private RowFactory").Append(index).Append("() {}").NewLine();
+            }
+            else
+            {
+                // we need one instance per type, so we must use a getter method and store the instance in a static dictionary
+                sb.Append("private sealed class RowFactory").Append(index).Append(" : global::Dapper.RowFactory").Append("<").Append(type).Append(">")
+                    .Indent().NewLine()
+                    .Append("private static readonly System.Collections.Concurrent.ConcurrentDictionary<global::System.Type, RowFactory").Append(index).Append("> s_instances = new();").NewLine()
+                    .Append("internal static RowFactory").Append(index).Append(" GetInstance(global::System.Type type) => s_instances.GetOrAdd(type, _ => new(type));").NewLine()
+                    .Append("private global::System.Type m_type;").NewLine()
+                    .Append("private RowFactory").Append(index).Append("(global::System.Type type) { m_type = type; }").NewLine();
+            }
         }
         void WriteRowFactoryFooter()
         {
@@ -842,6 +856,11 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
 
                     token++;
                 }
+            }
+            else if (useTypeAsConstructorParameter)
+            {
+                sb.Append(type.NullableAnnotation == NullableAnnotation.Annotated
+                    ? type.WithNullableAnnotation(NullableAnnotation.None) : type).Append(" result = global::System.Activator.CreateInstance(m_type) as ").Append(type).Append(";").NewLine();
             }
             else
             {
@@ -1442,25 +1461,26 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
             AdditionalCommandState = additionalCommandState;
         }
 
-        public (OperationFlags Flags, IMethodSymbol Method, ITypeSymbol? ParameterType, string ParameterMap, Location? UniqueLocation, AdditionalCommandState? AdditionalCommandState) Group()
-            => new(Flags, Method, ParameterType, ParameterMap, (Flags & (OperationFlags.CacheCommand | OperationFlags.IncludeLocation)) == 0 ? null : Location, AdditionalCommandState);
+        public (OperationFlags Flags, IMethodSymbol Method, ITypeSymbol? ParameterType, string ParameterMap, Location? UniqueLocation, AdditionalCommandState? AdditionalCommandState, ITypeSymbol? resultType) Group()
+            => new(Flags, Method, ParameterType, ParameterMap, (Flags & (OperationFlags.CacheCommand | OperationFlags.IncludeLocation)) == 0 ? null : Location, AdditionalCommandState, ResultType);
     }
-    private sealed class CommonComparer : LocationComparer, IEqualityComparer<(OperationFlags Flags, IMethodSymbol Method, ITypeSymbol? ParameterType, string ParameterMap, Location? UniqueLocation, AdditionalCommandState? AdditionalCommandState)>
+    private sealed class CommonComparer : LocationComparer, IEqualityComparer<(OperationFlags Flags, IMethodSymbol Method, ITypeSymbol? ParameterType, string ParameterMap, Location? UniqueLocation, AdditionalCommandState? AdditionalCommandState, ITypeSymbol? resultType)>
     {
         public static readonly CommonComparer Instance = new();
         private CommonComparer() { }
 
         public bool Equals(
 
-            (OperationFlags Flags, IMethodSymbol Method, ITypeSymbol? ParameterType, string ParameterMap, Location? UniqueLocation, AdditionalCommandState? AdditionalCommandState) x,
-            (OperationFlags Flags, IMethodSymbol Method, ITypeSymbol? ParameterType, string ParameterMap, Location? UniqueLocation, AdditionalCommandState? AdditionalCommandState) y) => x.Flags == y.Flags
+            (OperationFlags Flags, IMethodSymbol Method, ITypeSymbol? ParameterType, string ParameterMap, Location? UniqueLocation, AdditionalCommandState? AdditionalCommandState, ITypeSymbol? resultType) x,
+            (OperationFlags Flags, IMethodSymbol Method, ITypeSymbol? ParameterType, string ParameterMap, Location? UniqueLocation, AdditionalCommandState? AdditionalCommandState, ITypeSymbol? resultType) y) => x.Flags == y.Flags
                 && x.ParameterMap == y.ParameterMap
                 && SymbolEqualityComparer.Default.Equals(x.Method, y.Method)
                 && SymbolEqualityComparer.Default.Equals(x.ParameterType, y.ParameterType)
                 && x.UniqueLocation == y.UniqueLocation
-                && Equals(x.AdditionalCommandState, y.AdditionalCommandState);
+                && Equals(x.AdditionalCommandState, y.AdditionalCommandState)
+                && SymbolEqualityComparer.Default.Equals(x.resultType, y.resultType);
 
-        public int GetHashCode((OperationFlags Flags, IMethodSymbol Method, ITypeSymbol? ParameterType, string ParameterMap, Location? UniqueLocation, AdditionalCommandState? AdditionalCommandState) obj)
+        public int GetHashCode((OperationFlags Flags, IMethodSymbol Method, ITypeSymbol? ParameterType, string ParameterMap, Location? UniqueLocation, AdditionalCommandState? AdditionalCommandState, ITypeSymbol? resultType) obj)
         {
             var hash = (int)obj.Flags;
             hash *= -47;
@@ -1481,6 +1501,11 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
             if (obj.AdditionalCommandState is not null)
             {
                 hash += obj.AdditionalCommandState.GetHashCode();
+            }
+            hash *= -47;
+            if (obj.resultType is not null)
+            {
+                hash += SymbolEqualityComparer.Default.GetHashCode(obj.resultType);
             }
             return hash;
         }
