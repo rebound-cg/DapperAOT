@@ -877,6 +877,9 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
             {
                 var memberType = member.CodeType;
 
+                // check if type is enum
+                var isEnum = memberType is INamedTypeSymbol namedType && namedType.TypeKind == TypeKind.Enum;
+
                 member.GetDbType(out var readerMethod);
                 var nullCheck = Inspection.CouldBeNullable(memberType) ? $"reader.IsDBNull(columnOffset) ? ({CodeWriter.GetTypeName(memberType.WithNullableAnnotation(NullableAnnotation.Annotated))})null : " : "";
                 sb.Append("case ").Append(token).Append(":").NewLine().Indent(false);
@@ -889,7 +892,10 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
                 sb.Append(nullCheck);
                 if (readerMethod is null)
                 {
-                    sb.Append("reader.GetFieldValue<").Append(memberType).Append(">(columnOffset);");
+                    if (!isEnum)
+                        sb.Append("reader.GetFieldValue<").Append(memberType).Append(">(columnOffset);");
+                    else
+                        sb.Append("(").Append(memberType).Append(")reader.GetFieldValue<long>(columnOffset);");
                 }
                 else
                 {
@@ -904,11 +910,21 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
                 if (useDeferredConstruction) sb.Append(DeferredConstructionVariableName).Append(token);
                 else sb.Append("result.").Append(member.CodeName);
 
-                sb.Append(" = ")
-                    .Append(nullCheck)
-                    .Append("GetValue<")
-                    .Append(Inspection.MakeNonNullable(memberType)).Append(">(reader, columnOffset);").NewLine()
-                    .Append("break;").NewLine().Outdent(false);
+                if (!isEnum)
+                {
+                    sb.Append(" = ")
+                        .Append(nullCheck)
+                        .Append("GetValue<")
+                        .Append(Inspection.MakeNonNullable(memberType)).Append(">(reader, columnOffset);").NewLine()
+                        .Append("break;").NewLine().Outdent(false);
+                }
+                else
+                {
+                    sb.Append(" = ")
+                        .Append(nullCheck)
+                        .Append("(").Append(memberType).Append(")GetValue<long>(reader, columnOffset);").NewLine()
+                        .Append("break;").NewLine().Outdent(false);
+                }
 
                 token++;
             }
