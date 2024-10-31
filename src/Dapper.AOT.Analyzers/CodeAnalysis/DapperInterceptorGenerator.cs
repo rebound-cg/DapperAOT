@@ -878,7 +878,12 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
                 var memberType = member.CodeType;
 
                 // check if type is enum
-                var isEnum = memberType is INamedTypeSymbol namedType && namedType.TypeKind == TypeKind.Enum;
+                var isEnum = memberType.TypeKind == TypeKind.Enum;
+                if (!isEnum && memberType is INamedTypeSymbol namedType)
+                {
+                    var unwrappedType = UnwrapNullableValueType(namedType);
+                    isEnum = unwrappedType.TypeKind == TypeKind.Enum;
+                }
 
                 member.GetDbType(out var readerMethod);
                 var nullCheck = Inspection.CouldBeNullable(memberType) ? $"reader.IsDBNull(columnOffset) ? ({CodeWriter.GetTypeName(memberType.WithNullableAnnotation(NullableAnnotation.Annotated))})null : " : "";
@@ -1009,6 +1014,16 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
                 sb.Append("return result;").NewLine().Outdent().NewLine();
             }
         }
+    }
+
+    static ITypeSymbol UnwrapNullableValueType(INamedTypeSymbol typeSymbol)
+    {
+        if (typeSymbol.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T
+            && typeSymbol.TypeArguments[0] is var nullableTypeArgument)
+        {
+            return nullableTypeArgument;
+        }
+        return typeSymbol;
     }
 
     [Flags]
