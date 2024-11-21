@@ -859,8 +859,14 @@ public sealed partial class DapperInterceptorGenerator : InterceptorGeneratorBas
             }
             else if (useTypeAsConstructorParameter)
             {
-                sb.Append(type.NullableAnnotation == NullableAnnotation.Annotated
-                    ? type.WithNullableAnnotation(NullableAnnotation.None) : type).Append(" result = global::System.Activator.CreateInstance(m_type) as ").Append(type).Append(";").NewLine();
+                if (type.NullableAnnotation == NullableAnnotation.Annotated)
+                {
+                    sb.Append(type.WithNullableAnnotation(NullableAnnotation.None)).Append(" result = global::System.Activator.CreateInstance(m_type) as ").Append(type).Append(";").NewLine();
+                }
+                else
+                {
+                    sb.Append(type).Append(" result = (").Append(type).Append(")global::System.Activator.CreateInstance(m_type);").NewLine();
+                }
             }
             else
             {
